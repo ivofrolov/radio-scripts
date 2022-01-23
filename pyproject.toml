@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.black]
+target-version = ["py39", "py310"]
+skip-string-normalization = true
+
+[tool.pylint.master]
+py-version = 3.9
+
+[tool.pylint.messages_control]
+disable = "C0114,R0201,R0913"
+
+[tool.pylint.format]
+max-line-length = "88"

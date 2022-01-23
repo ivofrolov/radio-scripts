@@ -5,7 +5,8 @@ Console application to compile [Radio Music](https://musicthing.co.uk/pages/radi
 ## Installation
 
 1. Install [Python 3](https://www.python.org/downloads/)
-2. Run `pip3 install git+https://github.com/ivofrolov/radio-scripts.git`
+2. Install [SoX](http://sox.sourceforge.net/)
+3. Run `pip3 install git+https://github.com/ivofrolov/radio-scripts.git`
 
 ## Usage
 
@@ -16,5 +17,6 @@ Command `radioscripts <path to SD card>` will write 16 banks of 12 stations 30 m
 - [ ] debug output
 - [ ] progress output
 - [ ] free disk space check
-- [ ] package
+- [ ] package *RELEASE 1.0*
+- [ ] compression to make sounds equally loud
 - [ ] some kind of sounds categorization (speech, music, etc.) and similarity degree to make it sound more like radio

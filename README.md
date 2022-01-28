@@ -14,7 +14,7 @@ Command `radioscripts <path to SD card>` will write 16 banks of 12 stations 30 m
 
 # To Do
 
-- [ ] debug output
+- [x] debug output
 - [ ] progress output
 - [ ] free disk space check
 - [ ] package *RELEASE 1.0*

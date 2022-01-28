@@ -1,8 +1,12 @@
+import logging
 from pathlib import Path
 import shutil
 import subprocess
 import tempfile
 from typing import Iterable, Union
+
+
+logger = logging.getLogger(__name__)
 
 
 RADIOMUSIC_SAMPLE_RATE: int = 44100
@@ -31,6 +35,7 @@ def run_sox(*args: Union[str, Path]) -> str:
         raise SoxNotFoundError()
 
     cmd = [sox_path, *args]
+    logger.debug('Running %s', ' '.join(map(str, cmd)))
     try:
         completed_process = subprocess.run(
             cmd, capture_output=True, text=True, check=True

@@ -2,6 +2,7 @@ from collections import deque
 from concurrent.futures import Future, ThreadPoolExecutor, wait
 from contextlib import suppress
 from itertools import zip_longest
+import logging
 from pathlib import Path
 import random
 import shutil
@@ -11,6 +12,9 @@ from typing import Iterable, Iterator, Protocol
 import urllib.request
 
 from radioscripts.audio import SoxError, make_radio_program, measure_durations
+
+
+logger = logging.getLogger(__name__)
 
 
 class Catalog(Protocol):
@@ -51,7 +55,16 @@ class Worker(threading.Thread):
 
     def run(self):
         """Executes cooperative samples compilation processes."""
+        logger.debug(
+            (
+                'Starting filling %(target)s with %(banks)d banks of %(files)d files '
+                '%(minutes)d minutes each from %(catalog)s'
+            ),
+            vars(self),
+        )
+
         self.enqueue_sections()
+        logger.debug('%d sections enqueued', len(self._sections))
 
         with ThreadPoolExecutor() as executor:
             futures: list[Future] = []
@@ -61,8 +74,17 @@ class Worker(threading.Thread):
 
             wait(futures)
 
+        logger.debug('Done')
+
     def compose_station(self, bank: int, file: int, minutes: int):
         """Compiles radio station and saves it in target storage."""
+        logger.debug(
+            'Starting radio station composing: bank %d file %d %d minutes long',
+            bank,
+            file,
+            minutes,
+        )
+
         samples_urls = self.choose_samples_urls(self.collect_catalogs_sounds())
         with tempfile.TemporaryDirectory() as tmpdir:
             samples = self.collect_samples(
@@ -73,11 +95,15 @@ class Worker(threading.Thread):
             make_radio_program(samples, program_path)
             if not program_path.exists():
                 return
+            logger.debug('Compiled radio station %s', program_path.name)
 
             bank_path = self.target / f'{bank:02}'
             bank_path.mkdir(exist_ok=True)
 
             shutil.copyfile(program_path, bank_path / program_path.name)
+            logger.debug('Radio station saved to %s', bank_path / program_path.name)
+
+        logger.debug('Done')
 
     def enqueue_sections(self):
         """Loads catalog section urls to queue."""
@@ -104,12 +130,16 @@ class Worker(threading.Thread):
         """Downloads and yields samples while they all fit provided duration."""
         remaining = duration
         for url in urls:
-            filename = dir_ / Path(url).name
-            urllib.request.urlretrieve(url, filename)
+            filename = Path(url).name
+            filepath = dir_ / filename
+
+            urllib.request.urlretrieve(url, filepath)
+            logger.debug('%s downloaded', url)
 
             try:
-                file_duration = next(iter(measure_durations(filename)))
-            except SoxError:
+                file_duration = next(iter(measure_durations(filepath)))
+            except SoxError as exc:
+                logger.debug('%s discarded due to the error\n%s', filename, exc)
                 continue
 
             if remaining - file_duration <= 0:
@@ -117,7 +147,8 @@ class Worker(threading.Thread):
                 skips_count -= 1
                 if skips_count <= 0:
                     break
+                logger.debug('%s skipped as too long', filename)
                 continue
 
             remaining -= file_duration
-            yield filename
+            yield filepath

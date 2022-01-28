@@ -1,4 +1,5 @@
 import argparse
+import logging
 from pathlib import Path
 
 from radioscripts.audio import calculate_required_space
@@ -10,8 +11,8 @@ catalogs: dict[str, type[Catalog]] = {
     'ubuweb': UbuSoundCatalog,
 }
 
-
 parser = argparse.ArgumentParser(description='Compose radio stations broadcast')
+parser.add_argument('--debug', action='store_true', help='Enable debugging output')
 parser.add_argument(
     '-c',
     '--catalog',
@@ -46,6 +47,11 @@ parser.add_argument('path', type=Path, help='Path to SD card')
 def entrypoint():
     """Compiles Radio Music module compatible stations from online catalog of sounds."""
     args = parser.parse_args()
+
+    logging.basicConfig(
+        format='%(asctime)s %(threadName)s %(name)s %(message)s',
+        level=logging.DEBUG if args.debug else logging.CRITICAL,
+    )
 
     volume = calculate_required_space(args.banks, args.files, args.minutes)
     if volume > 1024 * 1024 * 1024:

@@ -1,10 +1,13 @@
 from html.parser import HTMLParser
+import logging
 from typing import Optional
 import urllib.parse
 import urllib.request
 
-
 from radioscripts.worker import Catalog
+
+
+logger = logging.getLogger(__name__)
 
 
 class ResourceParser(HTMLParser):
@@ -19,6 +22,7 @@ class ResourceParser(HTMLParser):
         self.data: list[str] = []
         with urllib.request.urlopen(url) as response:
             self.feed(response.read().decode())
+        logger.debug('Found %d URLs on %s page', len(self.data), url)
         return self.data
 
     def quote(self, url: str) -> str:
@@ -70,3 +74,6 @@ class UbuSoundCatalog(Catalog):
     def sounds(self, url: str) -> list[str]:
         """Returns list of sound URLs from provided page."""
         return UbuSoundCompositionsParser().parse(url)
+
+    def __str__(self):
+        return f'UbuWeb Sound Catalog {self.START_URL}'

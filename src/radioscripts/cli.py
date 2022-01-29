@@ -1,6 +1,8 @@
 import argparse
+from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
 import logging
 from pathlib import Path
+import sys
 
 from radioscripts.audio import calculate_required_space
 from radioscripts.ubuweb import UbuSoundCatalog
@@ -44,14 +46,22 @@ parser.add_argument(
 parser.add_argument('path', type=Path, help='Path to SD card')
 
 
+def log_uncaught_exception(type_, value, traceback):
+    logging.critical('%s\nProgram terminated', value)
+
+
 def entrypoint():
     """Compiles Radio Music module compatible stations from online catalog of sounds."""
     args = parser.parse_args()
 
-    logging.basicConfig(
-        format='%(asctime)s %(threadName)s %(name)s %(message)s',
-        level=logging.DEBUG if args.debug else logging.CRITICAL,
-    )
+    if args.debug:
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format='%(asctime)s %(threadName)s %(name)s %(message)s',
+        )
+    else:
+        logging.basicConfig(level=logging.CRITICAL, format='%(message)s')
+        sys.excepthook = log_uncaught_exception
 
     volume = calculate_required_space(args.banks, args.files, args.minutes)
     if volume > 1024 * 1024 * 1024:
@@ -69,5 +79,8 @@ def entrypoint():
         files=args.files,
         minutes=args.minutes,
     )
-    worker.start()
-    worker.join()
+    with ThreadPoolExecutor(thread_name_prefix='Composer') as executor:
+        done, _ = wait(worker.start(executor), return_when=FIRST_EXCEPTION)
+        for future in done:
+            # resolve future to see if exception occured
+            future.result()

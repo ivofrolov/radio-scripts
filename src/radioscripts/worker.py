@@ -1,5 +1,5 @@
 from collections import deque
-from concurrent.futures import Future, ThreadPoolExecutor, wait
+from concurrent.futures import Future, Executor
 from contextlib import suppress
 from itertools import zip_longest
 import logging
@@ -7,7 +7,6 @@ from pathlib import Path
 import random
 import shutil
 import tempfile
-import threading
 from typing import Iterable, Iterator, Protocol
 import urllib.request
 
@@ -29,7 +28,7 @@ class Catalog(Protocol):
         ...
 
 
-class Worker(threading.Thread):
+class Worker:
     """Compiles Radio Music module compatible stations from online catalog of sounds."""
 
     def __init__(
@@ -42,8 +41,6 @@ class Worker(threading.Thread):
         *,
         diversity: int = 5,
     ):
-        super().__init__()
-
         self._sections: deque[str] = deque()
 
         self.target = target
@@ -53,33 +50,27 @@ class Worker(threading.Thread):
         self.minutes = minutes
         self.diversity = diversity
 
-    def run(self):
-        """Executes cooperative samples compilation processes."""
+    def start(self, executor: Executor) -> Iterator[Future]:
+        """Schedules cooperative radio stations compilation processes."""
         logger.debug(
             (
-                'Starting filling %(target)s with %(banks)d banks of %(files)d files '
+                'Starting to fill %(target)s with %(banks)d banks of %(files)d files '
                 '%(minutes)d minutes each from %(catalog)s'
             ),
             vars(self),
         )
 
         self.enqueue_sections()
-        logger.debug('%d sections enqueued', len(self._sections))
+        logger.debug('%d catalog sections enqueued', len(self._sections))
 
-        with ThreadPoolExecutor() as executor:
-            futures: list[Future] = []
-            for bank in range(self.banks):
-                for file in range(self.files):
-                    executor.submit(self.compose_station, bank, file, self.minutes)
-
-            wait(futures)
-
-        logger.debug('Done')
+        for bank in range(self.banks):
+            for file in range(self.files):
+                yield executor.submit(self.compose_station, bank, file, self.minutes)
 
     def compose_station(self, bank: int, file: int, minutes: int):
-        """Compiles radio station and saves it in target storage."""
+        """Compiles radio station from samples and saves it to the target storage."""
         logger.debug(
-            'Starting radio station composing: bank %d file %d %d minutes long',
+            'Starting to compose radio station: bank %d file %d %d minutes long',
             bank,
             file,
             minutes,
@@ -101,9 +92,7 @@ class Worker(threading.Thread):
             bank_path.mkdir(exist_ok=True)
 
             shutil.copyfile(program_path, bank_path / program_path.name)
-            logger.debug('Radio station saved to %s', bank_path / program_path.name)
-
-        logger.debug('Done')
+            logger.debug('Audio saved to %s', bank_path / program_path.name)
 
     def enqueue_sections(self):
         """Loads catalog section urls to queue."""
@@ -112,7 +101,7 @@ class Worker(threading.Thread):
 
     def collect_catalogs_sounds(self) -> Iterator[list[str]]:
         """Provides randomly ordered lists of sound urls from N catalog sections."""
-        with suppress(IndexError):  # no section no sounds
+        with suppress(IndexError):  # no sections left - no more sounds yielded
             for _ in range(self.diversity):
                 sounds = self.catalog.sounds(self._sections.popleft())
                 yield random.sample(sounds, len(sounds))

@@ -1,8 +1,12 @@
 import argparse
-from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
+from concurrent.futures import Future, ThreadPoolExecutor
+import itertools
 import logging
 from pathlib import Path
+import shutil
 import sys
+import time
+from typing import Iterable
 
 from radioscripts.audio import calculate_required_space
 from radioscripts.ubuweb import UbuSoundCatalog
@@ -50,6 +54,49 @@ def log_uncaught_exception(type_, value, traceback):
     logging.critical('%s\nProgram terminated', value)
 
 
+def wait_progress(
+    futures: Iterable[Future],
+    *,
+    spinner_symbols: tuple[str, ...] = ('⠏', '⠛', '⠹', '⢸', '⣰', '⣤', '⣆', '⡇'),
+    pending_progress_symbol: str = '░',
+    finished_progress_symbol: str = '█',
+):
+    """Displays progress bar while waiting for futures to complete."""
+    done: set[Future] = set()
+    not_done = set(futures)
+    total = len(not_done)
+
+    # first two characters for spinner and space + space at the end
+    max_chars = min(total, shutil.get_terminal_size().columns - 3)
+    spinner = itertools.cycle(spinner_symbols)
+
+    while not_done:
+        running = 0
+        for future in not_done:
+            if future.done():
+                future.result()  # resolve future to see if exception occured
+                done.add(future)
+            elif future.running():
+                running += 1
+        not_done -= done
+
+        pending_progress = int(max_chars * running / total)
+        finished_progress = int(max_chars * len(done) / total)
+        sys.stdout.write(
+            '\r'
+            + next(spinner)
+            + ' '
+            + finished_progress_symbol * finished_progress
+            + pending_progress_symbol * pending_progress
+        )
+        sys.stdout.flush()
+
+        time.sleep(0.25)
+
+    sys.stdout.write('\r' + ' ' * (max_chars + 2))
+    sys.stdout.write('\rProcess completed\n')
+
+
 def entrypoint():
     """Compiles Radio Music module compatible stations from online catalog of sounds."""
     args = parser.parse_args()
@@ -80,7 +127,4 @@ def entrypoint():
         minutes=args.minutes,
     )
     with ThreadPoolExecutor(thread_name_prefix='Composer') as executor:
-        done, _ = wait(worker.start(executor), return_when=FIRST_EXCEPTION)
-        for future in done:
-            # resolve future to see if exception occured
-            future.result()
+        wait_progress(worker.start(executor))

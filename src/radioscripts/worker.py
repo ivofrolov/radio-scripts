@@ -1,7 +1,7 @@
 from collections import deque
 from concurrent.futures import Future, Executor
 from contextlib import suppress
-from itertools import zip_longest
+from itertools import count, zip_longest
 import logging
 from pathlib import Path
 import random
@@ -66,6 +66,7 @@ class Worker:
         for bank in range(self.banks):
             for file in range(self.files):
                 yield executor.submit(self.compose_station, bank, file, self.minutes)
+        logger.debug('%d jobs pending', self.banks * self.files)
 
     def compose_station(self, bank: int, file: int, minutes: int):
         """Compiles radio station from samples and saves it to the target storage."""
@@ -84,15 +85,10 @@ class Worker:
 
             program_path = Path(tmpdir) / f'{file:02}.wav'
             make_radio_program(samples, program_path)
-            if not program_path.exists():
-                return
             logger.debug('Compiled radio station %s', program_path.name)
 
-            bank_path = self.target / f'{bank:02}'
-            bank_path.mkdir(exist_ok=True)
-
-            shutil.copyfile(program_path, bank_path / program_path.name)
-            logger.debug('Audio saved to %s', bank_path / program_path.name)
+            stored_path = self.copyfile(program_path, self.target / f'{bank:02}')
+            logger.debug('Audio saved to %s', stored_path)
 
     def enqueue_sections(self):
         """Loads catalog section urls to queue."""
@@ -141,3 +137,17 @@ class Worker:
 
             remaining -= file_duration
             yield filepath
+
+    def copyfile(self, src: Path, dir_: Path) -> Path:
+        """Copies file to directory overwriting an existing file.
+        Stores the provided file under a new name in case of conflict.
+        """
+        dir_.mkdir(exist_ok=True)
+        dst = dir_ / src.name
+        for num in count(1):
+            if not dst.exists():
+                break
+            # append like version to filename
+            dst = dst.with_stem(src.stem + '-' + str(num))
+        shutil.copyfile(src, dst)
+        return dst

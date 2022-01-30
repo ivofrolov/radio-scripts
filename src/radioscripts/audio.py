@@ -52,9 +52,14 @@ def measure_durations(*paths: Path) -> list[float]:
 
 
 def convert(
-    input_path: Path, output_path: Path, channels: int, sample_rate: int, bit_depth: int
+    input_path: Path,
+    output_path: Path,
+    *,
+    channels: int,
+    sample_rate: int,
+    bit_depth: int,
 ):
-    """Converts sound file sample rate, bit depth and channels number to provided values.
+    """Converts file sample rate, bit depth and channels number to provided values.
     And also removes silence from the beggining and end of the audio.
     """
     # fmt: off
@@ -73,7 +78,7 @@ def convert(
     # fmt: on
 
 
-def join(input_paths: list[Path], output_path: Path, crossfade_duration: float):
+def join(input_paths: list[Path], output_path: Path, *, crossfade_duration: float):
     """Splices sounds together."""
     if not input_paths:
         return
@@ -102,16 +107,24 @@ def make_radio_program(
     sample_rate: int = RADIOMUSIC_SAMPLE_RATE,
     bit_depth: int = RADIOMUSIC_BIT_DEPTH,
 ):
-    """Concatenates sounds together into a wav file, creating a kind of radio station."""
+    """Concatenates sounds together into a wav file,
+    creating a kind of radio station.
+    """
     with tempfile.TemporaryDirectory() as tmpdir:
         staging_paths: list[Path] = []
         for index, input_path in enumerate(input_paths, start=1):
             staging_path = (
                 Path(tmpdir).joinpath(f'{index}_{input_path.name}').with_suffix('.wav')
             )
-            convert(input_path, staging_path, channels, sample_rate, bit_depth)
+            convert(
+                input_path,
+                staging_path,
+                channels=channels,
+                sample_rate=sample_rate,
+                bit_depth=bit_depth,
+            )
             staging_paths.append(staging_path)
-        join(staging_paths, output_path, crossfade_duration)
+        join(staging_paths, output_path, crossfade_duration=crossfade_duration)
 
 
 def calculate_required_space(
@@ -121,6 +134,7 @@ def calculate_required_space(
     *,
     sample_rate: int = RADIOMUSIC_SAMPLE_RATE,
     bit_depth: int = RADIOMUSIC_BIT_DEPTH,
-) -> float:
+) -> int:
     """Returns the size in bytes of N banks of M wav files K minutes each."""
-    return banks * files * minutes * 60 * sample_rate * bit_depth / 8
+    bits = banks * files * minutes * 60 * sample_rate * bit_depth
+    return int(bits / 8 + 0.5)

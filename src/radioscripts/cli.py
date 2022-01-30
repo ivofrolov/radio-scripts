@@ -66,7 +66,8 @@ def wait_progress(
     not_done = set(futures)
     total = len(not_done)
 
-    # first two characters for spinner and space + space at the end
+    # try to represent the future as a single block if the bar fits terminal width
+    # first two characters are reserved for spinner and space + space at the end
     max_chars = min(total, shutil.get_terminal_size().columns - 3)
     spinner = itertools.cycle(spinner_symbols)
 
@@ -74,7 +75,7 @@ def wait_progress(
         running = 0
         for future in not_done:
             if future.done():
-                future.result()  # resolve future to see if exception occured
+                future.result()  # resolve the future to see if exception occured
                 done.add(future)
             elif future.running():
                 running += 1
@@ -97,8 +98,23 @@ def wait_progress(
     sys.stdout.write('\rProcess completed\n')
 
 
+def pretty_size(bytes_: int) -> tuple[float, str]:
+    """Returns scaled to gigabytes or megabytes number and the corresponding unit."""
+    if bytes_ > 1024**3:
+        label = 'Gb'
+        value = bytes_ / 1024**3
+    else:
+        label = 'Mb'
+        value = bytes_ / 1024**2
+    return value, label
+
+
 def entrypoint():
-    """Compiles Radio Music module compatible stations from online catalog of sounds."""
+    """Compiles Radio Music module compatible stations
+    from online catalog of sounds.
+
+    Program main function.
+    """
     args = parser.parse_args()
 
     if args.debug:
@@ -110,17 +126,22 @@ def entrypoint():
         logging.basicConfig(level=logging.CRITICAL, format='%(message)s')
         sys.excepthook = log_uncaught_exception
 
-    volume = calculate_required_space(args.banks, args.files, args.minutes)
-    if volume > 1024 * 1024 * 1024:
-        label = 'Gb'
-        volume /= 1024 * 1024 * 1024
-    else:
-        label = 'Mb'
-        volume /= 1024 * 1024
-    print('Space required on SD card is', f'{volume:.3f}', label)
+    target_path = args.path.resolve(strict=True)  # make sure the path exists
+
+    total_size = calculate_required_space(args.banks, args.files, args.minutes)
+    print('Space required on SD card is {0:.3f} {1}'.format(*pretty_size(total_size)))
+
+    free_space = shutil.disk_usage(target_path).free
+    if free_space < total_size:
+        prompt = (
+            f'There is not enough free disk space on {target_path.anchor}. '
+            'Do you want to continue? (y/N) '
+        )
+        if input(prompt) != 'y':
+            sys.exit(2)
 
     worker = Worker(
-        target=args.path.resolve(strict=True),
+        target=target_path,
         catalog=catalogs[args.catalog](),
         banks=args.banks,
         files=args.files,

@@ -40,6 +40,12 @@ def run_sox(*args: Union[str, Path]) -> str:
         completed_process = subprocess.run(
             cmd, capture_output=True, text=True, check=True
         )
+        logger.debug(
+            'Sox stdout << EOB\n%s\n%s', completed_process.stdout.strip(), 'EOB'
+        )
+        logger.debug(
+            'Sox stderr << EOB\n%s\n%s', completed_process.stderr.strip(), 'EOB'
+        )
         return completed_process.stdout
     except subprocess.CalledProcessError as exc:
         raise SoxError(exc.returncode, exc.stderr) from exc
@@ -65,10 +71,10 @@ def convert(
     # fmt: off
     run_sox(
         input_path,
-        '-G',
         '-b', f'{bit_depth}',
         output_path,
         'channels', f'{channels}',
+        'gain', '-n',
         'rate', '-s', '-a', f'{sample_rate}',
         'reverse',
         'silence', '1', '5', '0',
@@ -92,7 +98,8 @@ def join(input_paths: list[Path], output_path: Path, *, crossfade_duration: floa
         *input_paths,
         output_path,
         'splice', '-q', *[f'{position},{excess}' for position in splices],
-        'norm',
+        'compand', '0,0.02', '1:-6,0,-3', '0', '-90', '0.01',  # little bit of limiting
+        'gain', '-n',
         'dither', '-s',
     )
     # fmt: on

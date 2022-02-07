@@ -1,5 +1,5 @@
 import argparse
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 import itertools
 import logging
 from pathlib import Path
@@ -148,4 +148,8 @@ def entrypoint():
         minutes=args.minutes,
     )
     with ThreadPoolExecutor(thread_name_prefix='Composer') as executor:
-        wait_progress(worker.start(executor))
+        futures = worker.start(executor)
+        if args.debug:
+            wait(futures)
+        else:
+            wait_progress(futures)

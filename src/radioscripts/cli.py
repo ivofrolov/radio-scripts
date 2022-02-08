@@ -9,7 +9,7 @@ import time
 from typing import Iterable
 
 from radioscripts.audio import calculate_required_space
-from radioscripts.ubuweb import UbuSoundCatalog
+from radioscripts.catalogs import UbuSoundCatalog
 from radioscripts.worker import Catalog, Worker
 
 

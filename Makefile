@@ -2,14 +2,17 @@ help:
 	# see https://marmelab.com/blog/2016/02/29/auto-documented-makefile.html
 	grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "%-10s %s\n", $$1, $$2}'
 
-app: ## build executable Python zip archive
-	python3 -m zipapp -p "/usr/bin/env python3" -m "radioscripts.cli:entrypoint" -o dist/radioscripts src/
+zipapp: ## build Python zip archive
+	python3 -m zipapp -c -m "radioscripts.cli:entrypoint" -o dist/radioscripts.pyz src/
+
+package:  ## build Python package
+	python3 -m build --no-isolation
 
 format: ## format sources with black
 	black src/radioscripts/
 
-lint:  ## lint codebase with flake8
+lint: ## lint codebase with flake8
 	pylint src/radioscripts/
 
-.PHONY .SILENT: help app format lint
+.PHONY .SILENT: help format lint package zipapp
 .DEFAULT_GOAL := help

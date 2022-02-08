@@ -62,16 +62,15 @@ class UbuSoundCatalog(Catalog):
 
     START_URL = 'https://www.ubu.com/sound/index.html'
 
-    sections_parser = LinksExtractor(r'^https://www\.ubu\.com/sound/.+')
-    sounds_parser = LinksExtractor(r'^https://www\.ubu\.com/.+\.mp3$')
-
     def sections(self) -> list[str]:
         """Returns list of section pages URLs which contain sounds."""
-        return self.sections_parser.parse(self.START_URL)
+        sections_parser = LinksExtractor(r'^https://www\.ubu\.com/sound/.+')
+        return sections_parser.parse(self.START_URL)
 
     def sounds(self, url: str) -> list[str]:
         """Returns list of sound URLs from provided page."""
-        return self.sounds_parser.parse(url)
+        sounds_parser = LinksExtractor(r'^https://www\.ubu\.com/.+\.mp3$')
+        return sounds_parser.parse(url)
 
     def __str__(self):
         return f'UbuWeb Sound Catalog {self.START_URL}'

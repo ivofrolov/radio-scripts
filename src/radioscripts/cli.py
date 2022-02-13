@@ -1,5 +1,5 @@
 import argparse
-from concurrent.futures import Future, ThreadPoolExecutor, wait
+from concurrent.futures import FIRST_EXCEPTION, Future, ThreadPoolExecutor, wait
 import itertools
 import logging
 from pathlib import Path
@@ -75,7 +75,9 @@ def wait_progress(
         running = 0
         for future in not_done:
             if future.done():
-                future.result()  # resolve the future to see if exception occured
+                if exc := future.exception():
+                    sys.stdout.write('\n')  # to not interfere with an error message
+                    raise exc
                 done.add(future)
             elif future.running():
                 running += 1
@@ -94,6 +96,7 @@ def wait_progress(
 
         time.sleep(0.25)
 
+    # erase progress bar
     sys.stdout.write('\r' + ' ' * (max_chars + 2))
     sys.stdout.write('\rProcess completed\n')
 
@@ -147,9 +150,15 @@ def entrypoint():
         files=args.files,
         minutes=args.minutes,
     )
-    with ThreadPoolExecutor(thread_name_prefix='Composer') as executor:
+    executor = ThreadPoolExecutor(thread_name_prefix='Composer')
+    try:
         futures = worker.start(executor)
         if args.debug:
-            wait(futures)
+            done, _ = wait(futures, return_when=FIRST_EXCEPTION)
+            for future in done:
+                future.result()  # resolve done futures to find exception occured
         else:
             wait_progress(futures)
+    except Exception as exc:
+        executor.shutdown(wait=True, cancel_futures=True)
+        raise exc

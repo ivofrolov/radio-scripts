@@ -1,18 +1,26 @@
-help: 
-	# see https://marmelab.com/blog/2016/02/29/auto-documented-makefile.html
-	grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "%-10s %s\n", $$1, $$2}'
+.DEFAULT_GOAL := check
 
-zipapp: ## build Python zip archive
-	python3 -m zipapp -c -m "radioscripts.cli:entrypoint" -o dist/radioscripts.pyz src/
+src = src
+package = radioscripts
+pysources = $(wildcard $(src)/$(package)/*.py)
+zipapp = dist/$(package).pyz
 
-package:  ## build Python package
+$(zipapp): $(pysources) # build Python zip archive
+	python3 -m zipapp -c -m "$(package).cli:entrypoint" -o $@ $(src)
+
+.PHONY: package
+package: # build Python package
 	python3 -m build --no-isolation
 
-format: ## format sources with black
-	black src/radioscripts/
+build: $(zipapp) package
 
-lint: ## lint codebase with flake8
-	pylint src/radioscripts/
+.PHONY: format
+format: # format sources with black
+	black $(pysources)
 
-.PHONY .SILENT: help format lint package zipapp
-.DEFAULT_GOAL := help
+.PHONY: lint
+lint: # lint codebase with pylint
+	pylint $(pysources)
+
+.PHONY: check
+check: format lint

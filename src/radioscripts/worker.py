@@ -33,12 +33,12 @@ class Worker:
 
     def __init__(
         self,
+        *,
         target: Path,
         catalog: Catalog,
         banks: int,
         files: int,
         minutes: int,
-        *,
         diversity: int = 5,
     ):
         self._sections: deque[str] = deque()
@@ -87,7 +87,9 @@ class Worker:
             make_radio_program(samples, program_path)
             logger.debug('Compiled radio station %s', program_path.name)
 
-            stored_path = self.copyfile(program_path, self.target / f'{bank:02}')
+            stored_path = self.copy_file_safely(
+                program_path, self.target / f'{bank:02}'
+            )
             logger.debug('Audio saved to %s', stored_path)
 
     def enqueue_sections(self):
@@ -138,16 +140,17 @@ class Worker:
             remaining -= file_duration
             yield filepath
 
-    def copyfile(self, src: Path, dir_: Path) -> Path:
-        """Copies file to directory overwriting an existing file.
-        Stores the provided file under a new name in case of conflict.
+    def copy_file_safely(self, src: Path, dir_: Path) -> Path:
+        """Copies file to a directory without overwriting an existing
+        file. Stores the provided file under a new name in case of
+        conflict.
         """
         dir_.mkdir(exist_ok=True)
         dst = dir_ / src.name
         for num in count(1):
             if not dst.exists():
                 break
-            # append like version to filename
+            # append something like a version to the filename
             dst = dst.with_stem(src.stem + '-' + str(num))
         shutil.copyfile(src, dst)
         return dst

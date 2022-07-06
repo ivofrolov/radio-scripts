@@ -10,7 +10,7 @@ skip-string-normalization = true
 py-version = 3.9
 
 [tool.pylint.messages_control]
-disable = "C0114,C0209,C0326,C0330,R0201,R0913"
+disable = "C0114,C0209,R0913"
 
 [tool.pylint.format]
 max-line-length = "88"

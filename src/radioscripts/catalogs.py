@@ -1,7 +1,8 @@
+import contextlib
 from html.parser import HTMLParser
 import logging
 import re
-from typing import Optional
+from typing import Generic, Optional, TypeVar
 import urllib.parse
 import urllib.request
 
@@ -11,25 +12,42 @@ from radioscripts.worker import Catalog
 logger = logging.getLogger(__name__)
 
 
-class ResourceParser(HTMLParser):
-    """Simple HTML parser wrapper to extract URLs from web pages."""
+ScrapedItem = TypeVar('ScrapedItem')
 
-    def parse(self, url: str) -> list[str]:
-        """Returns list of URLs found on the web page.
+
+class HTMLResourceParser(HTMLParser, Generic[ScrapedItem]):
+    """Simple HTML parser wrapper to extract data from web pages online."""
+
+    _data: list[ScrapedItem]
+
+    def add_item(self, item: ScrapedItem):
+        self._data.append(item)
+
+    def parse(self, url: str) -> list[ScrapedItem]:
+        """Returns some data found on a web page.
 
         Use this method as an entrypoint.
         """
         self.reset()
         self.url = url
-        self.data: list[str] = []
-        with urllib.request.urlopen(url) as response:
-            self.feed(response.read().decode())
-        self.close()
-        logger.debug('Found %d URLs on %s page', len(self.data), url)
-        return self.data
+        self._data = []
+        with contextlib.closing(self):
+            with urllib.request.urlopen(url) as response:
+                self.feed(response.read().decode())
+        logger.debug('Found %d items on %s page', len(self._data), url)
+        return self._data
 
-    def quote(self, url: str) -> str:
-        """Replaces special characters in sections of the URL using the %xx escape."""
+
+class LinksExtractor(HTMLResourceParser[str]):
+    """Extracts URLs from hyperlinks (HTML `<a>` elements with `href` attribute)."""
+
+    def __init__(self, pattern: str):
+        super().__init__()
+        self._pattern = re.compile(pattern)
+
+    @staticmethod
+    def quote(url: str) -> str:
+        """Replaces special characters in the URL using the %xx escape sequence."""
         scheme, netloc, path, query, fragment = urllib.parse.urlsplit(url)
         return urllib.parse.urlunsplit(
             (
@@ -41,20 +59,12 @@ class ResourceParser(HTMLParser):
             )
         )
 
-
-class LinksExtractor(ResourceParser):
-    """Extracts URLs from hyperlinks (HTML `<a>` elements with `href` attribute)."""
-
-    def __init__(self, pattern: str):
-        super().__init__()
-        self._pattern = re.compile(pattern)
-
     def handle_starttag(self, tag: str, attrs: list[tuple[str, Optional[str]]]):
         if tag == 'a':
             if href := next((value for attr, value in attrs if attr == 'href'), None):
                 target_url = urllib.parse.urljoin(self.url, href)
                 if self._pattern.match(target_url):
-                    self.data.append(self.quote(target_url))
+                    self.add_item(self.quote(target_url))
 
 
 class UbuSoundCatalog(Catalog):

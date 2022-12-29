@@ -21,11 +21,9 @@ class Catalog(Protocol):
 
     def sections(self) -> list[str]:
         """Should return list of section pages urls which contain sounds."""
-        ...
 
     def sounds(self, url: str) -> list[str]:
         """Should return list of sound urls from provided page."""
-        ...
 
 
 class Worker:

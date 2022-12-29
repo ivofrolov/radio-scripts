@@ -62,7 +62,7 @@ class LinksExtractor(HTMLResourceParser[str]):
     def handle_starttag(self, tag: str, attrs: list[tuple[str, Optional[str]]]):
         if tag == 'a':
             if href := next((value for attr, value in attrs if attr == 'href'), None):
-                target_url = urllib.parse.urljoin(self.url, href)
+                target_url = urllib.parse.unquote(urllib.parse.urljoin(self.url, href))
                 if self._pattern.match(target_url):
                     self.add_item(self.quote(target_url))
 
@@ -84,3 +84,22 @@ class UbuSoundCatalog(Catalog):
 
     def __str__(self):
         return f'UbuWeb Sound Catalog {self.START_URL}'
+
+
+class IrdialCatalog(Catalog):
+    """Represents Irdial (A212 version 2) Catalog."""
+
+    START_URL = 'http://irdial.hyperreal.org/'
+
+    def sections(self) -> list[str]:
+        """Returns list of section pages URLs which contain sounds."""
+        sections_parser = LinksExtractor(r'^http://irdial\.hyperreal\.org/.+/$')
+        return sections_parser.parse(self.START_URL)
+
+    def sounds(self, url: str) -> list[str]:
+        """Returns list of sound URLs from provided page."""
+        sounds_parser = LinksExtractor(r'^http://irdial\.hyperreal\.org/.+.mp3$')
+        return sounds_parser.parse(url)
+
+    def __str__(self):
+        return f'Irdial Catalog {self.START_URL}'

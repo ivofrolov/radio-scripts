@@ -9,12 +9,13 @@ import time
 from typing import Iterable
 
 from radioscripts.audio import calculate_required_space
-from radioscripts.catalogs import UbuSoundCatalog
+from radioscripts.catalogs import IrdialCatalog, UbuSoundCatalog
 from radioscripts.worker import Catalog, Worker
 
 
 catalogs: dict[str, type[Catalog]] = {
     'ubuweb': UbuSoundCatalog,
+    'irdial': IrdialCatalog,
 }
 
 parser = argparse.ArgumentParser(description='Compose radio stations broadcast')

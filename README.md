@@ -6,7 +6,6 @@ eurorack module compatible "stations" from online sound catalogs.
 Currently supported catalogs are
 
   * [UbuWeb Sound](https://www.ubu.com/sound/index.html)
-  * [Irdial](http://irdial.hyperreal.org/)
 
 ## Installation
 
@@ -22,9 +21,3 @@ randomly selected, but each station contains sounds from 5 catalog
 sections.
 
 See `python3 radioscripts.pyz` for options.
-
-# To Do
-
-- [ ] some kind of sounds categorization (speech, music, etc.) by
-      similarity degree in order to make stations sound more like
-      radio

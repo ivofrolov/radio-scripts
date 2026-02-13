@@ -1,16 +1,17 @@
-[build-system]
-requires = ["setuptools", "wheel"]
-build-backend = "setuptools.build_meta"
+[project]
+name = "radioscripts"
+authors = [{ name="Ivan Frolov", email="ivofrolov@fastmail.com" }]
+description = "Console application to compile Radio Music eurorack module compatible stations from UbuWeb Sound catalog"
+license = "MIT"
+readme = "README.md"
+requires-python = ">=3.12"
 
-[tool.black]
-target-version = ["py39", "py310"]
-skip-string-normalization = true
+[project.urls]
+Homepage = "https://github.com/ivofrolov/radio-scripts"
+Issues = "https://github.com/ivofrolov/radio-scripts/issues"
 
-[tool.pylint.master]
-py-version = 3.9
+[tool.ruff]
+fix = true
 
-[tool.pylint.messages_control]
-disable = "C0114,C0209,R0913"
-
-[tool.pylint.format]
-max-line-length = "88"
+[tool.ruff.lint]
+select = ["E", "F", "I"]

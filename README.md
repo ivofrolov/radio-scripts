@@ -1,7 +1,6 @@
 # Radio Scripts
 
-Console application to compile [Radio Music](https://musicthing.co.uk/pages/radio.html)
-eurorack module compatible "stations" from online sound catalogs.
+Console application to compile [Radio Music](https://musicthing.co.uk/pages/radio.html) eurorack module compatible "stations" from online sound catalogs.
 
 Currently supported catalogs are
 
@@ -11,13 +10,10 @@ Currently supported catalogs are
 
 1. Install [Python 3](https://www.python.org/downloads/)
 2. Install [SoX](http://sox.sourceforge.net/)
-3. Download [latest release](https://github.com/ivofrolov/radio-scripts/releases/latest/download/radioscripts.pyz)
+3. Download [latest release](https://github.com/ivofrolov/radio-scripts/releases/latest/download/radioscripts)
 
 ## Usage
 
-Command `python3 radioscripts.pyz <path to SD card>` will write 16
-banks of 12 stations 30 minutes long each to the SD card. Samples are
-randomly selected, but each station contains sounds from 5 catalog
-sections.
+Command `python3 radioscripts <path to SD card>` will write 16 banks of 12 stations 30 minutes long each to the SD card. Samples are randomly selected, but each station contains sounds from 5 catalog sections.
 
-See `python3 radioscripts.pyz` for options.
+See `python3 radioscripts --help` for options.

@@ -14,6 +14,6 @@ Currently supported catalogs are
 
 ## Usage
 
-Command `python3 radioscripts <path to SD card>` will write 16 banks of 12 stations 30 minutes long each to the SD card. Samples are randomly selected, but each station contains sounds from 5 catalog sections.
+Command `python3 radioscripts <path to output directory>` will write a bank of 12 stations at least 30 minutes long each to the output directory.
 
 See `python3 radioscripts --help` for options.

@@ -6,31 +6,27 @@ __version__ = "3"
 
 import argparse
 import collections
+import concurrent.futures
 import contextlib
 import itertools
 import logging
+import os
 import random
 import re
 import shutil
-import signal
 import subprocess
 import sys
 import tempfile
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Iterable, Iterator
-from concurrent.futures import (
-    FIRST_EXCEPTION,
-    CancelledError,
-    Executor,
-    Future,
-    ThreadPoolExecutor,
-    wait,
-)
 from html.parser import HTMLParser
+from http import HTTPStatus
 from pathlib import Path
+from queue import Queue, ShutDown
 from typing import Any, Protocol
 
 
@@ -48,7 +44,7 @@ class HTMLResourceParser[T](HTMLParser):
 
     _data: list[T]
 
-    def add_item(self, item: T):
+    def add_item(self, item: T) -> None:
         self._data.append(item)
 
     def parse(self, url: str) -> list[T]:
@@ -62,14 +58,14 @@ class HTMLResourceParser[T](HTMLParser):
         with contextlib.closing(self):
             with urllib.request.urlopen(url) as response:
                 self.feed(response.read().decode())
-        self.logger.debug("Found %d items on %s page", len(self._data), url)
+        self.logger.debug("Found %d items on <%s> page", len(self._data), url)
         return self._data
 
 
 class LinksExtractor(HTMLResourceParser[str]):
     """Extracts URLs from hyperlinks (HTML `<a>` elements with `href` attribute)."""
 
-    def __init__(self, pattern: str):
+    def __init__(self, pattern: str) -> None:
         super().__init__()
         self._pattern = re.compile(pattern)
 
@@ -87,7 +83,7 @@ class LinksExtractor(HTMLResourceParser[str]):
             )
         )
 
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]):
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         if tag == "a":
             if href := next((value for attr, value in attrs if attr == "href"), None):
                 target_url = urllib.parse.unquote(urllib.parse.urljoin(self.url, href))
@@ -120,12 +116,12 @@ class UbuSoundCatalog(Catalog):
         sounds_parser = LinksExtractor(r"^https://www\.ubu\.com/.+\.mp3$")
         return sounds_parser.parse(url)
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"UbuWeb Sound Catalog <{self.START_URL}>"
 
 
 class SoxError(Exception):
-    def __init__(self, message: str, returncode: int | None = None):
+    def __init__(self, message: str, returncode: int | None = None) -> None:
         self.returncode = returncode
         self.message = message
 
@@ -142,13 +138,13 @@ class Sox:
 
     sox_path: str
 
-    def __init__(self):
+    def __init__(self) -> None:
         sox_path = shutil.which("sox")
         if not sox_path:
             raise SoxError("sox application not found")
         self.sox_path = sox_path
 
-    def __call__(self, *args: str | Path):
+    def __call__(self, *args: str | Path) -> str:
         cmd = [self.sox_path, *args]
         self.logger.debug("Running %s", " ".join(map(str, cmd)))
         try:
@@ -170,73 +166,89 @@ class Sox:
             raise SoxError(exc.stderr, exc.returncode) from exc
 
 
-class RadioMusic:
-    """Makes Radio Music eurorack module compatible audio files."""
+class StationComposer:
+    """Splices audio files together to make sort of radio station recording."""
 
-    logger = Logger
+    logger = Logger()
+
+    queue: Queue[Path | None]
+    sox: Sox
+    tmpdir: Path
 
     channels: int = 1
     bit_depth: int = 16
     sample_rate: int = 44100
+    filetype: str = "wav"
 
-    def __init__(self, sox: Sox):
+    def __init__(self, queue: Queue[Path | None], *, sox: Sox, tmpdir: Path) -> None:
+        self.queue = queue
         self.sox = sox
+        self.tmpdir = tmpdir
 
-    def calculate_required_space(self, banks: int, files: int, minutes: int) -> int:
-        """Returns the size in bytes of N banks of M wav files K minutes each."""
-        bits = banks * files * minutes * 60 * self.sample_rate * self.bit_depth
-        return int(bits / 8 + 0.5)
-
-    def make_program(
-        self,
-        samples: Iterable[Path],
-        output: Path,
-        *,
-        crossfade_duration: int = 2,
-    ):
-        """Concatenates sounds together into a wav file, creating a kind of radio
-        station.
-        """
-        with tempfile.TemporaryDirectory() as tmpdir:
-            staged: list[Path] = []
-            for index, sample in enumerate(samples, start=1):
-                staging_path = (
-                    Path(tmpdir).joinpath(f"{index}_{sample.name}").with_suffix(".wav")
-                )
-                self.convert(sample, staging_path)
-                staged.append(staging_path)
-            self.join(staged, output, crossfade_duration=crossfade_duration)
+    def __call__(self, output: Path, *, duration: float) -> None:
+        remaining_duration = duration
+        samples: list[Path] = []
+        try:
+            while source_path := queue.get():
+                try:
+                    measured_duration = self.measure_durations(source_path)
+                    remaining_duration -= next(iter(measured_duration))
+                except SoxError as exc:
+                    self.logger.debug(
+                        "File <%s> discarded due to the error\n%s",
+                        path,
+                        exc,
+                    )
+                    continue
+                processed_path = self.tmpdir / f"{source_path.stem}-processed.wav"
+                self.convert(source_path, processed_path)
+                samples.append(processed_path)
+                if remaining_duration <= 0:
+                    break
+        except ShutDown:
+            return
+        self.logger.debug(
+            "Collected %d samples with a total duration of %d seconds",
+            len(samples),
+            duration - remaining_duration,
+        )
+        self.join(samples, output)
 
     def measure_durations(self, *samples: Path) -> list[float]:
         """Returns durations of sound files in seconds."""
         sox_output = self.sox("--info", "-D", *samples)
         return [float(line) for line in sox_output.strip().splitlines()]
 
-    def convert(self, input: Path, output: Path):
-        """Converts file sample rate, bit depth and channels number to supported format
-        with silence removed.
-        """
+    def convert(self, input: Path, output: Path) -> None:
+        """Converts file to supported format."""
         # fmt: off
         self.sox(
             input,
-            '-b', f'{self.bit_depth}',
+            "-c", f"{self.channels}",
+            "-b", f"{self.bit_depth}",
+            "-r", f"{self.sample_rate}",
+            "-t", self.filetype,
             output,
-            'channels', f'{self.channels}',
-            'gain', '-n',  # normalize to 0dB
-            'rate', '-s', '-a', f'{self.sample_rate}',
             # remove silence from both ends of the file
-            'reverse',
-            'silence', '1', '5', '2%',
-            'reverse',
-            'silence', '1', '5', '2%',
+            "reverse",
+            "silence", "1", "5", "2%",
+            "reverse",
+            "silence", "1", "5", "2%",
+            # compress dynamic range to make samples more or less equally loud
+            "compand", "0.3,1", "6:-70,-60,-20", "-6", "-90", "0.2",
+            # normalize to 0dB
+            "gain", "-n",
         )
         # fmt: on
 
-    def join(self, samples: list[Path], output: Path, *, crossfade_duration: float):
+    def join(
+        self,
+        samples: list[Path],
+        output: Path,
+        *,
+        crossfade_duration: float = 1.0,
+    ) -> None:
         """Splices sounds together."""
-        if not samples:
-            return
-
         excess = crossfade_duration / 2
         splices = self.measure_durations(*samples)[:-1]
         for index in range(1, len(splices)):
@@ -244,172 +256,67 @@ class RadioMusic:
         # fmt: off
         self.sox(
             *samples,
+            "-c", f"{self.channels}",
+            "-b", f"{self.bit_depth}",
+            "-r", f"{self.sample_rate}",
+            "-t", self.filetype,
             output,
-            'splice', '-q', *[f'{position},{excess}' for position in splices],
-            'compand', '0,0.02', '1:-6,0,-3', '0', '-90', '0.01',  # little bit of limiting
-            'gain', '-n',                                          # normalize to 0dB
-            'dither', '-s',
+            "splice", "-q", *[f"{position},{excess}" for position in splices],
         )
         # fmt: on
 
 
-class Worker:
-    """Compiles Radio Music module compatible stations from online catalog of sounds."""
+class SamplesProducer:
+    """Downloads audio files from an online catalog."""
 
     logger = Logger()
 
+    catalog: Catalog
+    queue: Queue[Path | None]
+    tmpdir: Path
+
     def __init__(
         self,
+        queue: Queue[Path | None],
         *,
-        radio: RadioMusic,
         catalog: Catalog,
-        target: Path,
-        banks: int,
-        files: int,
-        minutes: int,
-        overwrite: bool = False,
-        diversity: int = 5,
-    ):
-        self._sections: collections.deque[str] = collections.deque()
-        self._cancel = threading.Event()
-
-        self.radio = radio
-        self.target = target
+        tmpdir: Path,
+    ) -> None:
         self.catalog = catalog
-        self.banks = banks
-        self.files = files
-        self.minutes = minutes
-        self.overwrite = overwrite
-        self.diversity = diversity
+        self.queue = queue
+        self.tmpdir = tmpdir
 
-    def start(self, executor: Executor) -> Iterator[Future]:
-        """Schedules cooperative radio stations compilation processes."""
-        self.logger.debug(
-            (
-                "Starting to fill %(target)s with %(banks)d banks of %(files)d files "
-                "%(minutes)d minutes each from %(catalog)s"
-            ),
-            vars(self),
-        )
+    def __call__(self) -> None:
+        with contextlib.suppress(ShutDown):
+            for url in self.samples():
+                path = self.tmpdir / "{}_{}".format(hash(url), Path(url).name)
+                try:
+                    urllib.request.urlretrieve(url, path)
+                except urllib.error.HTTPError as exc:
+                    if exc.code == HTTPStatus.NOT_FOUND:
+                        self.logger.debug("Skipped <%s>: not found", url)
+                        continue
+                self.logger.debug("Downloaded <%s>", url)
+                self.queue.put(path)
+            self.queue.put(None)
 
-        self.enqueue_sections()
-        self.logger.debug("%d catalog sections enqueued", len(self._sections))
+    def samples(self) -> Iterator[str]:
+        """Returns randomly ordered audio file URLs iterator."""
 
-        for bank in range(self.banks):
-            for file in range(self.files):
-                yield executor.submit(self.compose_station, bank, file)
-        self.logger.debug("%d jobs pending", self.banks * self.files)
+        def _sounds(url: str) -> Iterator[str]:
+            sounds = self.catalog.sounds(url)
+            random.shuffle(sounds)
+            yield from sounds
 
-    def cancel(self):
-        """Schedules cancelling currently executing tasks."""
-        self._cancel.set()
-
-    def compose_station(self, bank: int, file: int):
-        """Compiles radio station from samples and saves it to the target storage."""
-        self.logger.debug(
-            "Starting to compose radio station: bank %d file %d %d minutes long",
-            bank,
-            file,
-            self.minutes,
-        )
-
-        samples_urls = self.choose_samples_urls(self.collect_catalogs_sounds())
-        with tempfile.TemporaryDirectory() as tmpdir:
-            samples = self.collect_samples(
-                duration=self.minutes * 60,
-                urls=samples_urls,
-                dir_=Path(tmpdir),
-            )
-
-            program_path = Path(tmpdir) / f"{file:02}.wav"
-            self.radio.make_program(samples, program_path)
-            self.logger.debug("Compiled radio station %s", program_path.name)
-
-            stored_path = self.copy_file_safely(
-                program_path,
-                self.target / f"{bank:02}",
-                overwrite=self.overwrite,
-            )
-            self.logger.debug("Audio saved to %s", stored_path)
-
-    def enqueue_sections(self):
-        """Loads catalog section urls to queue."""
         sections = self.catalog.sections()
-        self._sections.extend(random.sample(sections, len(sections)))
-
-    def collect_catalogs_sounds(self) -> Iterator[list[str]]:
-        """Provides randomly ordered lists of sound urls from N catalog sections."""
-        with contextlib.suppress(IndexError):
-            # no sections left - no more sounds yielded
-            for _ in range(self.diversity):
-                if self._cancel.is_set():
-                    raise CancelledError
-                sounds = self.catalog.sounds(self._sections.popleft())
-                yield random.sample(sounds, len(sounds))
-
-    def choose_samples_urls(
-        self,
-        catalogs_sounds: Iterable[list[str]],
-    ) -> Iterator[str]:
-        """Provides randomly ordered samples from each of the catalog sections."""
-        for maybe_urls in itertools.zip_longest(*catalogs_sounds):
-            yield from filter(None, random.sample(maybe_urls, len(maybe_urls)))
-
-    def collect_samples(
-        self,
-        duration: float,
-        urls: Iterable[str],
-        dir_: Path,
-        *,
-        skips_count: int = 5,
-    ) -> Iterator[Path]:
-        """Downloads and yields samples while they all fit provided duration."""
-        remaining = duration
-        for url in urls:
-            if self._cancel.is_set():
-                raise CancelledError
-
-            filename = Path(url).name
-            filepath = dir_ / filename
-
-            urllib.request.urlretrieve(url, filepath)
-            self.logger.debug("%s downloaded", url)
-
+        random.shuffle(sections)
+        iterators = collections.deque(map(_sounds, sections))
+        while iterators:
             try:
-                file_duration = next(iter(self.radio.measure_durations(filepath)))
-            except SoxError as exc:
-                self.logger.debug("%s discarded due to the error\n%s", filename, exc)
-                continue
-
-            if remaining - file_duration <= 0:
-                # try to find another file that fits remaining length
-                skips_count -= 1
-                if skips_count <= 0:
-                    break
-                self.logger.debug("%s skipped as too long", filename)
-                continue
-
-            remaining -= file_duration
-            yield filepath
-
-    def copy_file_safely(
-        self,
-        src: Path,
-        dir_: Path,
-        *,
-        overwrite: bool = False,
-    ) -> Path:
-        """Copies file to a directory optionally keeping existing files."""
-        dir_.mkdir(exist_ok=True)
-        dst = dir_ / src.name
-        if not overwrite:
-            for num in itertools.count(1):
-                if not dst.exists():
-                    break
-                # append something like a version to the filename
-                dst = dst.with_stem(src.stem + "-" + str(num))
-        shutil.copyfile(src, dst)
-        return dst
+                yield next(iterators[0])
+                iterators.rotate(-1)
+            except StopIteration:
+                iterators.popleft()
 
 
 class CLI:
@@ -428,14 +335,14 @@ class CLI:
 
     @staticmethod
     def wait_progress(
-        futures: Iterable[Future],
+        futures: Iterable[concurrent.futures.Future],
         *,
         spinner_symbols: tuple[str, ...] = ("⠏", "⠛", "⠹", "⢸", "⣰", "⣤", "⣆", "⡇"),
         pending_progress_symbol: str = "░",
         finished_progress_symbol: str = "█",
-    ):
+    ) -> None:
         """Displays progress bar while waiting for futures to complete."""
-        done: set[Future] = set()
+        done: set[concurrent.futures.Future] = set()
         not_done = set(futures)
         total = len(not_done)
 
@@ -479,51 +386,38 @@ CATALOGS: dict[str, type[Catalog]] = {
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Compose Radio Music stations from online catalog sounds",
+        description="compose Radio Music stations from online catalog sounds",
     )
     parser.add_argument(
         "--debug",
         action="store_true",
-        help="Enable debugging output",
+        help="enable debugging output",
     )
     parser.add_argument(
         "-c",
         "--catalog",
         choices=CATALOGS.keys(),
         default=next(iter(CATALOGS.keys()), None),
-        help="Catalog to download samples from (default: %(default)s)",
-    )
-    parser.add_argument(
-        "-b",
-        "--banks",
-        type=int,
-        default=16,
-        help="Number of banks to fill (default: %(default)s)",
+        help="catalog to download samples from (default: %(default)s)",
     )
     parser.add_argument(
         "-f",
         "--files",
         type=int,
         default=12,
-        help="Number of stations per bank (default: %(default)s)",
+        help="number of files to make (default: %(default)s)",
     )
     parser.add_argument(
         "-m",
         "--minutes",
         type=int,
         default=30,
-        help="Audio file duration (default: %(default)s)",
-    )
-    parser.add_argument(
-        "-o",
-        "--overwrite",
-        action="store_true",
-        help="Overwrite existing files (default: keep)",
+        help="audio file duration (default: %(default)s)",
     )
     parser.add_argument(
         "path",
         type=Path,
-        help="Path to SD card",
+        help="directory path to save files to",
     )
 
     args = parser.parse_args()
@@ -546,52 +440,52 @@ if __name__ == "__main__":
     sox = Sox()
     _ = sox("--version")  # ensure sox is installed
 
-    radio = RadioMusic(sox)
-
-    total_size = radio.calculate_required_space(args.banks, args.files, args.minutes)
-    print(
-        "Space required on SD card is {0:.3f} {1}".format(*CLI.pretty_size(total_size))
+    max_workers = min(os.process_cpu_count() or 1, args.files)
+    executor = concurrent.futures.ThreadPoolExecutor(
+        max_workers=max_workers,
+        thread_name_prefix="Composer",
     )
 
-    free_space = shutil.disk_usage(path).free
-    if free_space < total_size:
-        prompt = (
-            f"There is not enough free disk space on {path.anchor}. "
-            "Do you want to continue? (y/N) "
+    tmpdir = tempfile.TemporaryDirectory()
+
+    queue = Queue(maxsize=max_workers)
+
+    producer = SamplesProducer(
+        queue,
+        catalog=CATALOGS[args.catalog](),
+        tmpdir=Path(tmpdir.name),
+    )
+    producer_thread = threading.Thread(
+        target=producer,
+        daemon=True,
+        name="Producer",
+    )
+    producer_thread.start()
+
+    composer = StationComposer(queue, sox=sox, tmpdir=Path(tmpdir.name))
+    futures = [
+        executor.submit(
+            composer,
+            args.path / f"{n:02}.wav",
+            duration=args.minutes * 60,
         )
-        if input(prompt) != "y":
-            sys.exit(2)
+        for n in range(1, args.files + 1)
+    ]
 
-    catalog = CATALOGS[args.catalog]()
-
-    worker = Worker(
-        radio=radio,
-        catalog=catalog,
-        target=path,
-        banks=args.banks,
-        files=args.files,
-        minutes=args.minutes,
-        overwrite=args.overwrite,
-    )
-
-    def cancel_work(signum, frame):
-        logging.debug("Got signal %r", signal.Signals(signum))
-        worker.cancel()
-
-    signal.signal(signal.SIGINT, cancel_work)
-
-    executor = ThreadPoolExecutor(thread_name_prefix="Composer")
     try:
-        futures = worker.start(executor)
         if args.debug:
-            done, _ = wait(futures, return_when=FIRST_EXCEPTION)
+            done, _ = concurrent.futures.wait(
+                futures,
+                return_when=concurrent.futures.FIRST_EXCEPTION,
+            )
             for future in done:
-                with contextlib.suppress(CancelledError):
+                if not future.cancelled:
                     future.result()  # resolve done futures to raise exception if any
         else:
             CLI.wait_progress(futures)
     finally:
-        worker.cancel()
+        queue.shutdown(immediate=True)
         executor.shutdown(wait=True, cancel_futures=True)
+        tmpdir.cleanup()
 
     print("Process completed")

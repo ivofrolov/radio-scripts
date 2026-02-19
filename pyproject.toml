@@ -4,7 +4,7 @@ authors = [{ name="Ivan Frolov", email="ivofrolov@fastmail.com" }]
 description = "Console application to compile Radio Music eurorack module compatible stations from UbuWeb Sound catalog"
 license = "MIT"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.13"
 
 [project.urls]
 Homepage = "https://github.com/ivofrolov/radio-scripts"
